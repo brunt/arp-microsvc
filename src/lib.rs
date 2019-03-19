@@ -1,4 +1,4 @@
-use std::thread;
+use std::{thread, time};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{self, Sender, Receiver};
 use pnet::datalink::{self, Channel, NetworkInterface, MacAddr};
@@ -9,6 +9,11 @@ use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 use pnet::packet::{Packet, MutablePacket};
 use pnet::packet::arp::{ArpHardwareTypes, ArpOperations, ArpOperation, ArpPacket};
 
+
+use std::sync::mpsc::{self, Sender, Receiver};
+use std::net::{IpAddr, Ipv4Addr};
+
+use ipnetwork::{IpNetwork};
 
 pub fn send_arp_packet(
     interface: NetworkInterface,
@@ -76,3 +81,6 @@ pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<(Ipv4Addr, MacAd
         }
     });
 }
+//set up a channel, call send and recv, return results as a vec?
+//pub fn arp_results() {
+//}
