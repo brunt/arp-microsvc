@@ -7,11 +7,12 @@ use pnet::packet::ethernet::MutableEthernetPacket;
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
 use pnet::packet::{Packet, MutablePacket};
+
+
 use pnet::packet::arp::{ArpHardwareTypes, ArpOperations, ArpOperation, ArpPacket};
 
-
-use std::sync::mpsc::{self, Sender, Receiver};
-use std::net::{IpAddr, Ipv4Addr};
+//use std::sync::mpsc::{self, Sender, Receiver};
+//use std::net::{IpAddr, Ipv4Addr};
 
 use ipnetwork::{IpNetwork};
 

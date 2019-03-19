@@ -85,7 +85,7 @@ fn main() {
 
     for m in mac_list {
 //        println!("{}", m);
-        println!("{} : {} : {}", m.1, m.0, macvendor::vendor_request(&vendor_url, &m.1.to_string()).unwrap());
+        println!("{} : {} : {}", m.1, m.0, macvendor::vendor_request(&vendor_url, &m.1.to_string()[..8]).unwrap());
         thread::sleep(time::Duration::from_secs(5)); //the api is rate limited
     }
 }
