@@ -1,19 +1,17 @@
+use crate::api::arp::arp_handler;
+use crate::api::models::{AppState, ArpResponses};
 use actix_web::{
-    actix::Addr,
-    error, fs,
-    http::{header, Method},
-    middleware,
-    middleware::cors::Cors,
+    http::Method,
     App,
 };
-use pnet::datalink::{self, NetworkInterface};
-use crate::api::appstate::AppState;
-use crate::api::arp::arp_handler;
+use pnet::datalink;
 use std::sync::{Arc, Mutex};
 
 pub fn app_state() -> App<AppState> {
     App::with_state(AppState {
-        knowns: Arc::new(Mutex::new(Vec::new())),
+        knowns: Arc::new(Mutex::new(ArpResponses {
+            results: Vec::new(),
+        })),
         interface: datalink::interfaces()
             .iter()
             .filter(|ip| !ip.is_loopback() && !ip.ips.is_empty())

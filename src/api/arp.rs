@@ -1,8 +1,8 @@
-use actix_web::{FutureResponse, HttpRequest, HttpResponse, Json, State};
+use actix_web::{HttpRequest, HttpResponse};
 use pnet::datalink::{self, Channel, MacAddr, NetworkInterface};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::{env, thread, time};
+use std::{env, error::Error, thread, time};
 
 use pnet::packet::arp::MutableArpPacket;
 use pnet::packet::ethernet::MutableEthernetPacket;
@@ -12,7 +12,7 @@ use pnet::packet::{MutablePacket, Packet};
 use pnet::packet::arp::{ArpHardwareTypes, ArpOperation, ArpOperations, ArpPacket};
 
 use crate::api::macvendor::vendor_request;
-use crate::api::appstate::AppState;
+use crate::api::models::{AppState, ArpResponse, ArpResponses};
 use ipnetwork::IpNetwork;
 
 pub fn send_arp_packet(
@@ -48,7 +48,6 @@ pub fn send_arp_packet(
     arp_packet.set_sender_proto_addr(source_ip);
     arp_packet.set_target_hw_addr(target_mac);
     arp_packet.set_target_proto_addr(target_ip);
-
     ethernet_packet.set_payload(arp_packet.packet_mut());
 
     tx.send_to(ethernet_packet.packet(), Some(interface));
@@ -78,12 +77,10 @@ pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<(Ipv4Addr, MacAd
                         match tx.send(result) {
                             Ok(()) => (),
                             Err(e) => {
-//                                println!("{:?}",e);
                                 dbg!(e);
                                 ()
                             }
                         }
-//                        tx.send(result).unwrap();
                     }
                 }
                 Err(e) => panic!("An error occurred while reading packet: {}", e),
@@ -92,12 +89,16 @@ pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<(Ipv4Addr, MacAd
     });
 }
 
-//set up a channel, call send and recv, return results as a vec?
-pub fn arp_results(interface: NetworkInterface) -> Vec<String> {
-    //pub fn arp_results(req: HttpRequest<AppState>) -> FutureResponse<HttpResonse> {
+//set up a channel, call send and recv
+pub fn arp_results(
+    interface: NetworkInterface,
+    knowns: &mut ArpResponses,
+) -> Result<ArpResponses, Box<Error>> {
+
     //optional variable to add a comma-separated list of known mac addresses to ignore from displaying
-    let ignore_list = env::var("IGNORE").unwrap_or_default(); //todo: comma separated macs in env parsed here
-    let ignores_vec: Vec<&str> = ignore_list.split(",").collect();
+    let ignores = env::var("IGNORE").unwrap_or_default();
+    let ignores_vec: Vec<&str> = ignores.split(",").collect();
+
     //the url for the api that returns vendor information from the mac addr
     let vendor_url = env::var("MACVENDOR_URL").unwrap_or("https://api.macvendors.com".to_string());
     let source_mac = interface.mac_address();
@@ -126,13 +127,16 @@ pub fn arp_results(interface: NetworkInterface) -> Vec<String> {
                             arp_operation,
                         );
                     }
-                    e => panic!("Error while parsing to IPv4 address: {}", e),
+                    e => {
+                        println!("Error while parsing to IPv4 address: {}", e);
+                    }
                 }
             }
+        },
+        e => {
+            println!("Error while attempting to get network for interface: {}", e);
         }
-        e => panic!("Error while attempting to get network for interface: {}", e),
     }
-    thread::sleep(time::Duration::from_secs(5));
     let mut mac_list: Vec<(Ipv4Addr, MacAddr)> = Vec::new();
     loop {
         match rx.try_recv() {
@@ -140,30 +144,56 @@ pub fn arp_results(interface: NetworkInterface) -> Vec<String> {
             Err(_) => break,
         }
     }
-    let mut output: Vec<String> = Vec::new();
+    let mut output = ArpResponses {
+        results: Vec::new(),
+    };
     for m in mac_list {
-        if !ignores_vec.contains(&&format!("{}", m.1)[..]) {
-            //is there a direct way from mac to &str?
-            match vendor_request(&vendor_url, &m.1.to_string()[..8]) {
+        let short_mac = &m.1.to_string()[..8]; //only the first 6 hex characters are required to obtain vendor name and compare.
+        if !ignores_vec.contains(&short_mac) && !knowns.results.contains(&ArpResponse{
+            mac_addr: short_mac.to_string(),
+            vendor_name: "".to_string(),
+        }) {
+            //mac addr -> String -> &str
+            match vendor_request(&vendor_url, short_mac) {
                 Ok(s) => {
-                    output.push(s);
-                },
+                    output.results.push(ArpResponse {
+                        mac_addr: short_mac.to_string(),
+                        vendor_name: s.clone(),
+                    });
+                    knowns.results.push(ArpResponse{
+                        mac_addr: short_mac.to_string(),
+                        vendor_name: s,
+                    });
+                    println!("{:?}",knowns);
+                }
                 Err(e) => {
+                    // send error, channel was closed too soon
+                    // an error here means not all responses are shown
                     println!("{:?}", e);
-                    //send error, channel was closed too soon
                 }
             }
-            thread::sleep(time::Duration::from_secs(1)); //the api is rate limited
+            thread::sleep(time::Duration::from_secs(1)); //the api is rate limited so pause between calls
         }
     }
-    output
+    Ok(output)
 }
 
-//todo: try futureresponse, error handling
+//get interface and knowns from appstate,
+//read them both and pass them both into arp_results?
 pub fn arp_handler(req: HttpRequest<AppState>) -> HttpResponse {
     let iface = req.state().interface.clone();
-    let mut knowns = req.state().knowns.lock();
-    let outvec = arp_results(iface);
-
-    HttpResponse::Ok().json(outvec)
+    match req.state().knowns.lock() {
+        Ok(mut k) => {
+            //read list of knowns,
+            //if a mac addr on local network is not in list of knowns, call vendor api, then store results from api back into knowns
+            match arp_results(iface, &mut k) {
+                Ok(response) => HttpResponse::Ok().json(response),
+                Err(_) => HttpResponse::InternalServerError().finish()
+            }
+        }
+        Err(e) => {
+            println!("error obtaining mutex lock: {}", e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }
