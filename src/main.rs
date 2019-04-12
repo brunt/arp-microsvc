@@ -16,7 +16,6 @@ fn main() {
         .unwrap()
         .shutdown_timeout(2)
         .start();
-
-    sys.run();
     println!("app started on port {}", port);
+    sys.run();
 }

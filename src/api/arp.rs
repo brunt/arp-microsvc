@@ -20,19 +20,16 @@ pub fn send_arp_packet(
     source_ip: Ipv4Addr,
     source_mac: MacAddr,
     target_ip: Ipv4Addr,
-    target_mac: MacAddr,
-    arp_operation: ArpOperation,
 ) {
     let (mut tx, _) = match datalink::channel(&interface, Default::default()) {
         Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => panic!("Unknown channel type"),
         Err(e) => panic!("Error happened {}", e),
     };
-
     let mut ethernet_buffer = [0u8; 42];
     let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
 
-    ethernet_packet.set_destination(target_mac);
+    ethernet_packet.set_destination(MacAddr::broadcast());
     ethernet_packet.set_source(source_mac);
     ethernet_packet.set_ethertype(EtherTypes::Arp);
 
@@ -42,12 +39,13 @@ pub fn send_arp_packet(
     arp_packet.set_hardware_type(ArpHardwareTypes::Ethernet);
     arp_packet.set_protocol_type(EtherTypes::Ipv4);
     arp_packet.set_hw_addr_len(6);
-    arp_packet.set_proto_addr_len(4); //change this to use ipv6
-    arp_packet.set_operation(arp_operation);
+    arp_packet.set_proto_addr_len(4);
+    arp_packet.set_operation(ArpOperations::Request);
     arp_packet.set_sender_hw_addr(source_mac);
     arp_packet.set_sender_proto_addr(source_ip);
-    arp_packet.set_target_hw_addr(target_mac);
+    arp_packet.set_target_hw_addr(MacAddr::zero());
     arp_packet.set_target_proto_addr(target_ip);
+
     ethernet_packet.set_payload(arp_packet.packet_mut());
 
     tx.send_to(ethernet_packet.packet(), Some(interface));
@@ -102,12 +100,9 @@ pub fn arp_results(
     let source_mac = interface.mac_address();
     let source_network = interface.ips.iter().find(|ip| ip.is_ipv4()).unwrap();
     let source_ip = source_network.ip();
-    let arp_operation = ArpOperations::Request;
-    let target_mac = MacAddr::new(255, 255, 255, 255, 255, 255);
 
     // Channel for ARP replies.
     let (tx, rx): (Sender<MacAddr>, Receiver<MacAddr>) = mpsc::channel();
-
     recv_arp_packets(interface.clone(), tx);
 
     match source_network {
@@ -121,8 +116,6 @@ pub fn arp_results(
                             source_ipv4,
                             source_mac,
                             target_ipv4,
-                            target_mac,
-                            arp_operation,
                         );
                     }
                     e => {
@@ -146,7 +139,7 @@ pub fn arp_results(
         results: Vec::new(),
     };
     for m in mac_list {
-        let short_mac = &m.1.to_string()[..8]; //only the first 6 hex characters are required to obtain vendor name and compare.
+        let short_mac = &m.to_string()[..8]; //only the first 6 hex characters are required to obtain vendor name and compare.
         if !ignores_vec.contains(&short_mac) && !knowns.results.contains(&ArpResponse{
             mac_addr: short_mac.to_string(),
             vendor_name: "".to_string(),
