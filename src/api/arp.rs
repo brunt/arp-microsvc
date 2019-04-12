@@ -1,7 +1,7 @@
 use actix_web::{HttpRequest, HttpResponse};
 use pnet::datalink::{self, Channel, MacAddr, NetworkInterface};
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SendError};
 use std::{env, error::Error, thread, time};
 
 use pnet::packet::arp::MutableArpPacket;
@@ -53,7 +53,7 @@ pub fn send_arp_packet(
     tx.send_to(ethernet_packet.packet(), Some(interface));
 }
 
-pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<(Ipv4Addr, MacAddr)>) {
+pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<MacAddr>) {
     thread::spawn(move || {
         let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
             Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
@@ -70,13 +70,11 @@ pub fn recv_arp_packets(interface: NetworkInterface, tx: Sender<(Ipv4Addr, MacAd
                     let arp_reply_op = ArpOperation::new(2_u16);
 
                     if arp_packet.get_operation() == arp_reply_op {
-                        let result: (Ipv4Addr, MacAddr) = (
-                            arp_packet.get_sender_proto_addr(),
-                            arp_packet.get_sender_hw_addr(),
-                        );
+                        let result: MacAddr = arp_packet.get_sender_hw_addr();
                         match tx.send(result) {
                             Ok(()) => (),
-                            Err(e) => {
+                            Err(SendError(e)) => {
+
                                 dbg!(e);
                                 ()
                             }
@@ -108,7 +106,7 @@ pub fn arp_results(
     let target_mac = MacAddr::new(255, 255, 255, 255, 255, 255);
 
     // Channel for ARP replies.
-    let (tx, rx): (Sender<(Ipv4Addr, MacAddr)>, Receiver<(Ipv4Addr, MacAddr)>) = mpsc::channel();
+    let (tx, rx): (Sender<MacAddr>, Receiver<MacAddr>) = mpsc::channel();
 
     recv_arp_packets(interface.clone(), tx);
 
@@ -137,10 +135,10 @@ pub fn arp_results(
             println!("Error while attempting to get network for interface: {}", e);
         }
     }
-    let mut mac_list: Vec<(Ipv4Addr, MacAddr)> = Vec::new();
+    let mut mac_list: Vec<MacAddr> = Vec::new();
     loop {
         match rx.try_recv() {
-            Ok((ipv4_addr, mac_addr)) => mac_list.push((ipv4_addr, mac_addr)),
+            Ok( mac_addr) => mac_list.push(mac_addr),
             Err(_) => break,
         }
     }
