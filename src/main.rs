@@ -12,10 +12,11 @@ fn main() {
 
     let sys = System::new("arp-microsvc");
     server::new(move || router::app_state())
-        .bind(format!("localhost:{}", &port))
+        .bind(format!("0.0.0.0:{}", &port))
         .unwrap()
         .shutdown_timeout(2)
         .start();
     println!("app started on port {}", port);
     sys.run();
+
 }

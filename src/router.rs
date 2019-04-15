@@ -1,9 +1,6 @@
 use crate::api::arp::arp_handler;
 use crate::api::models::{AppState, ArpResponses};
-use actix_web::{
-    http::Method,
-    App,
-};
+use actix_web::{http::Method, App};
 use pnet::datalink;
 use std::sync::{Arc, Mutex};
 
